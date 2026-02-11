@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Solar Potential – Greece (Vector Tile Version)</title>
+<title>Solar Potential – Greece</title>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
-<script src="https://unpkg.com/deck.gl@8.9.34/dist.min.js"></script>
 
 <style>
 body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
@@ -14,24 +13,26 @@ body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
 
 .panel {
   position:absolute;
-  background:rgba(15,15,15,0.95);
+  background:rgba(15,15,15,0.96);
   color:#ddd;
-  padding:12px;
+  padding:14px;
   border-radius:4px;
-  font-size:12px;
+  font-size:13px;
   z-index:10;
+  line-height:1.4;
 }
 
-#legend { bottom:20px; left:20px; width:240px; }
+#legend { bottom:20px; left:20px; width:260px; }
 
-h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
-.legend-item { margin:4px 0; }
-.legend-color {
-  display:inline-block;
-  width:14px;
+.legend-gradient {
   height:14px;
-  margin-right:6px;
+  background: linear-gradient(to right, #ffe680, #ffb000, #ff7800);
+  margin:10px 0;
+  border-radius:3px;
 }
+
+h3 { margin:0 0 6px 0; color:#fff; font-size:15px; }
+.small { font-size:11px; color:#aaa; }
 </style>
 </head>
 
@@ -40,49 +41,31 @@ h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
 <div id="map"></div>
 
 <div id="legend" class="panel">
-  <h3>Solar Potential (kWh/m²/year)</h3>
-  <div class="legend-item">
-    <span class="legend-color" style="background:#ff7800;"></span> > 1800
-  </div>
-  <div class="legend-item">
-    <span class="legend-color" style="background:#ffb000;"></span> 1600–1800
-  </div>
-  <div class="legend-item">
-    <span class="legend-color" style="background:#ffe680;"></span> < 1600
+  <h3>Solar Irradiation (kWh/m²/year)</h3>
+  <div class="legend-gradient"></div>
+  <div>1600 → 2000+</div>
+  <div class="small">
+    Demo surface. Replace with PVGIS raster tiles.
   </div>
 </div>
 
 <script>
 
 // -----------------------------------------------------------------------------
-// Map Setup – Greece-wide
+// CONFIG
+// -----------------------------------------------------------------------------
+
+const MAPTILER_KEY = "fmHz7ZycUzBddOZvkGZO";
+
+// -----------------------------------------------------------------------------
+// MAP INITIALIZATION
 // -----------------------------------------------------------------------------
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: {
-    version: 8,
-    sources: {
-      osm: {
-        type: 'raster',
-        tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'],
-        tileSize: 256
-      },
-      buildings: {
-        type: 'vector',
-        tiles: ['https://tiles.openmaptiles.org/tiles/v3/{z}/{x}/{y}.pbf']
-      }
-    },
-    layers: [
-      {
-        id: 'osm-base',
-        type: 'raster',
-        source: 'osm'
-      }
-    ]
-  },
+  style: `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${MAPTILER_KEY}`,
   center: [22.5, 39.0],
-  zoom: 6.2,
+  zoom: 6.3,
   pitch: 60,
   bearing: -20,
   antialias: true
@@ -90,20 +73,54 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl());
 
-// -----------------------------------------------------------------------------
-// Add 3D Buildings (Vector Tile Source)
-// -----------------------------------------------------------------------------
-
 map.on('load', () => {
+
+  // ---------------------------------------------------------------------------
+  // 1️⃣ Add Solar Raster Layer (Smooth Surface)
+  // ---------------------------------------------------------------------------
+
+  map.addSource('solar-raster', {
+    type: 'raster',
+    tiles: [
+      // This uses Carto grayscale terrain as placeholder smooth surface
+      'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png'
+    ],
+    tileSize: 256
+  });
+
+  map.addLayer({
+    id: 'solar-layer',
+    type: 'raster',
+    source: 'solar-raster',
+    paint: {
+      'raster-opacity': 0.35,
+      'raster-hue-rotate': 45,
+      'raster-saturation': 0.8
+    }
+  }, 'water'); // place below labels
+
+  // ---------------------------------------------------------------------------
+  // 2️⃣ Add Real 3D Buildings
+  // ---------------------------------------------------------------------------
+
+  const layers = map.getStyle().layers;
+  let labelLayerId;
+
+  for (const layer of layers) {
+    if (layer.type === 'symbol' && layer.layout['text-field']) {
+      labelLayerId = layer.id;
+      break;
+    }
+  }
 
   map.addLayer({
     id: '3d-buildings',
-    type: 'fill-extrusion',
-    source: 'buildings',
+    source: 'openmaptiles',
     'source-layer': 'building',
+    type: 'fill-extrusion',
     minzoom: 14,
     paint: {
-      'fill-extrusion-color': '#666',
+      'fill-extrusion-color': '#777',
       'fill-extrusion-height': [
         'coalesce',
         ['get', 'height'],
@@ -111,73 +128,12 @@ map.on('load', () => {
         6
       ],
       'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.9
+      'fill-extrusion-opacity': 0.95
     }
-  });
+  }, labelLayerId);
 
-});
-
-// -----------------------------------------------------------------------------
-// Solar Surface (Greece-scale synthetic demo)
-// -----------------------------------------------------------------------------
-
-function generateSolarSurface() {
-  const features = [];
-  const step = 0.25;  // large grid for country scale
-
-  for (let lon = 19; lon <= 28; lon += step) {
-    for (let lat = 34; lat <= 42; lat += step) {
-
-      const base = 1500;
-      const southBoost = (42 - lat) * 50;
-      const value = base + southBoost + Math.random() * 50;
-
-      const poly = [
-        [lon, lat],
-        [lon + step, lat],
-        [lon + step, lat + step],
-        [lon, lat + step],
-        [lon, lat]
-      ];
-
-      features.push({
-        type: "Feature",
-        properties: { solar: Math.round(value) },
-        geometry: { type: "Polygon", coordinates: [poly] }
-      });
-    }
-  }
-
-  return { type: "FeatureCollection", features };
-}
-
-const solarGeoJSON = generateSolarSurface();
-
-let overlay = null;
-
-map.on('load', () => {
-
-  const solarLayer = new deck.GeoJsonLayer({
-    id: 'solar',
-    data: solarGeoJSON,
-    filled: true,
-    stroked: false,
-    getFillColor: d => {
-      const v = d.properties.solar;
-      if (v > 1800) return [255,120,0,160];
-      if (v > 1600) return [255,176,0,140];
-      return [255,230,120,120];
-    }
-  });
-
-  overlay = new deck.MapboxOverlay({
-    layers: [solarLayer]
-  });
-
-  map.addControl(overlay);
 });
 
 </script>
-
 </body>
 </html>
