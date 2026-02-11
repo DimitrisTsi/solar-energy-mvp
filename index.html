@@ -2,13 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Solar MVP</title>
+<title>Solar – Greece Stable</title>
 
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
 
 <style>
 body { margin:0; }
 #map { width:100vw; height:100vh; }
+.panel {
+  position:absolute;
+  bottom:20px;
+  left:20px;
+  background:rgba(15,15,15,0.95);
+  color:white;
+  padding:12px;
+  border-radius:6px;
+  font-size:13px;
+}
+.gradient {
+  height:14px;
+  width:220px;
+  background: linear-gradient(to right, #1e90ff, #ffff00, #ff4500);
+  margin-top:6px;
+}
 </style>
 </head>
 
@@ -16,16 +32,16 @@ body { margin:0; }
 
 <div id="map"></div>
 
-<!-- Load MapLibre FIRST -->
-<script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+<div class="panel">
+  Solar Irradiation (Demo)
+  <div class="gradient"></div>
+  Low → High
+</div>
 
-<!-- Load Deck FULL BUNDLE -->
+<script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/deck.gl@8.9.34/dist/umd/deck.gl.js"></script>
 
-<!-- THEN your code -->
 <script>
-
-console.log("Script running...");
 
 const MAPTILER_KEY = "fmHz7ZycUzBddOZvkGZO";
 
@@ -33,15 +49,77 @@ const map = new maplibregl.Map({
   container: 'map',
   style: `https://api.maptiler.com/maps/basic-dark/style.json?key=${MAPTILER_KEY}`,
   center: [22.5, 39.0],
-  zoom: 6.2,
+  zoom: 6.3,
   pitch: 60,
-  bearing: -20
+  bearing: -20,
+  antialias: true
 });
 
 map.addControl(new maplibregl.NavigationControl());
 
 map.on('load', () => {
-  console.log("Map loaded");
+
+  // ------------------------------------------------------------------
+  // 1️⃣ Force real 3D extrusion on existing building layer
+  // ------------------------------------------------------------------
+
+  map.setLayoutProperty('building', 'visibility', 'visible');
+
+  map.setPaintProperty('building', 'fill-extrusion-color', '#ffffff');
+
+  map.setPaintProperty('building', 'fill-extrusion-height', [
+    'case',
+    ['has', 'height'], ['get', 'height'],
+    ['has', 'levels'], ['*', ['get', 'levels'], 5],
+    30
+  ]);
+
+  map.setPaintProperty('building', 'fill-extrusion-opacity', 0.95);
+
+  map.setLight({
+    anchor: 'viewport',
+    position: [2, 90, 60],
+    intensity: 1.2
+  });
+
+  // ------------------------------------------------------------------
+  // 2️⃣ Solar Heatmap (deck.gl stable overlay)
+  // ------------------------------------------------------------------
+
+  const points = [];
+
+  const step = 0.2;
+
+  for (let lon = 19; lon <= 28; lon += step) {
+    for (let lat = 34; lat <= 42; lat += step) {
+
+      const base = 1600;
+      const southBoost = (42 - lat) * 80;
+      const value = base + southBoost;
+
+      points.push({
+        position: [lon, lat],
+        weight: value
+      });
+    }
+  }
+
+  const heatmap = new deck.HeatmapLayer({
+    id: 'solar-heat',
+    data: points,
+    getPosition: d => d.position,
+    getWeight: d => d.weight,
+    radiusPixels: 50,
+    intensity: 1.2,
+    threshold: 0.03
+  });
+
+  const overlay = new deck.MapboxOverlay({
+    layers: [heatmap]
+  });
+
+  map.addControl(overlay);
+
 });
 
 </script>
