@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Urban Solar Potential – Chania</title>
+<title>Urban Solar – Chania (Stable Version)</title>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
+
 <script src="https://unpkg.com/deck.gl@8.9.34/dist.min.js"></script>
 
 <style>
@@ -23,8 +24,8 @@ body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
 }
 
 #legend { bottom:20px; left:20px; width:240px; }
-
 h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
+
 .legend-item { margin:4px 0; }
 .legend-color {
   display:inline-block;
@@ -55,14 +56,14 @@ h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
 <script>
 
 // -----------------------------------------------------------------------------
-// Map Setup – Use OpenMapTiles style (supports buildings)
+// Map Setup
 // -----------------------------------------------------------------------------
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: 'https://demotiles.maplibre.org/style.json',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
   center: [24.018, 35.513],
-  zoom: 15.5,
+  zoom: 15,
   pitch: 60,
   bearing: -20,
   antialias: true
@@ -70,14 +71,8 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl());
 
-// Limit extent to city
-map.setMaxBounds([
-  [23.95, 35.47],
-  [24.08, 35.56]
-]);
-
 // -----------------------------------------------------------------------------
-// Generate Solar Surface (City-scale)
+// Generate Solar Surface
 // -----------------------------------------------------------------------------
 
 function generateSolarSurface() {
@@ -112,42 +107,77 @@ function generateSolarSurface() {
 
 const solarGeoJSON = generateSolarSurface();
 
-let overlay = null;
+// -----------------------------------------------------------------------------
+// Load OSM Buildings via Overpass
+// -----------------------------------------------------------------------------
 
-map.on('load', () => {
+async function loadBuildings() {
 
-  // Make style darker
-  map.setPaintProperty('background', 'background-color', '#0b0b0b');
+  const query = `
+  [out:json][timeout:25];
+  (
+    way["building"](35.49,23.99,35.54,24.05);
+  );
+  out body;
+  >;
+  out skel qt;
+  `;
 
-  // ---------------------------------------------------------------------------
-  // 3D Buildings (real extrusion)
-  // ---------------------------------------------------------------------------
+  const response = await fetch(
+    "https://overpass-api.de/api/interpreter",
+    {
+      method: "POST",
+      body: query
+    }
+  );
 
-  map.addLayer({
-    id: '3d-buildings',
-    source: 'openmaptiles',
-    'source-layer': 'building',
-    type: 'fill-extrusion',
-    minzoom: 14,
-    paint: {
-      'fill-extrusion-color': '#444',
-      'fill-extrusion-height': [
-        'coalesce',
-        ['get', 'height'],
-        ['*', ['get', 'levels'], 3],
-        8
-      ],
-      'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.9
+  const data = await response.json();
+
+  const nodes = {};
+  data.elements.forEach(el => {
+    if (el.type === "node") nodes[el.id] = [el.lon, el.lat];
+  });
+
+  const features = [];
+
+  data.elements.forEach(el => {
+    if (el.type === "way" && el.nodes) {
+      const coords = el.nodes.map(id => nodes[id]).filter(Boolean);
+      if (coords.length > 3) {
+        features.push({
+          type: "Feature",
+          properties: {
+            levels: el.tags?.["building:levels"]
+              ? parseInt(el.tags["building:levels"])
+              : 2
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [coords]
+          }
+        });
+      }
     }
   });
 
-  // ---------------------------------------------------------------------------
-  // Solar Surface Layer
-  // ---------------------------------------------------------------------------
+  return {
+    type: "FeatureCollection",
+    features
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Deck Layers
+// -----------------------------------------------------------------------------
+
+let overlay = null;
+
+async function initLayers() {
+
+  const buildings = await loadBuildings();
 
   const solarLayer = new deck.GeoJsonLayer({
-    id: 'solar-surface',
+    id: 'solar',
     data: solarGeoJSON,
     filled: true,
     stroked: false,
@@ -156,15 +186,28 @@ map.on('load', () => {
       if (v > 1800) return [255,120,0,180];
       if (v > 1700) return [255,176,0,160];
       return [255,230,120,140];
-    },
-    pickable: true
+    }
   });
 
-  overlay = new deck.MapboxOverlay({ layers: [solarLayer] });
+  const buildingLayer = new deck.GeoJsonLayer({
+    id: 'buildings',
+    data: buildings,
+    extruded: true,
+    wireframe: false,
+    filled: true,
+    getElevation: d => d.properties.levels * 3,
+    getFillColor: [100,100,100,200]
+  });
+
+  overlay = new deck.MapboxOverlay({
+    layers: [solarLayer, buildingLayer]
+  });
+
   map.addControl(overlay);
-});
+}
+
+map.on('load', initLayers);
 
 </script>
-
 </body>
 </html>
