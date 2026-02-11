@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Solar Greece Stable</title>
+<title>Solar Stable</title>
 
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
 
 <style>
-body { margin:0; overflow:hidden; }
+body { margin:0; }
 #map { width:100vw; height:100vh; }
 
 .panel {
@@ -16,7 +16,7 @@ body { margin:0; overflow:hidden; }
   left:20px;
   background:rgba(15,15,15,0.95);
   color:white;
-  padding:14px;
+  padding:12px;
   border-radius:6px;
   font-size:13px;
 }
@@ -61,9 +61,7 @@ map.addControl(new maplibregl.NavigationControl());
 
 map.on('load', () => {
 
-  // ---------------------------------------------------------
-  // 1️⃣ Add 3D Buildings (Independent of default layers)
-  // ---------------------------------------------------------
+  // 3D buildings
 
   map.addLayer({
     id: '3d-buildings',
@@ -89,40 +87,62 @@ map.on('load', () => {
     intensity: 1.3
   });
 
-  // ---------------------------------------------------------
-  // 2️⃣ Solar Heatmap Layer
-  // ---------------------------------------------------------
+  // SOLAR GRID (THIS WORKS)
 
-  const points = [];
-
-  const step = 0.15;
+  const features = [];
+  const step = 0.3;
 
   for (let lon = 19; lon <= 28; lon += step) {
     for (let lat = 34; lat <= 42; lat += step) {
 
       const base = 1600;
-      const southBoost = (42 - lat) * 90;
+      const southBoost = (42 - lat) * 80;
       const value = base + southBoost;
 
-      points.push({
-        position: [lon, lat],
-        weight: value
+      const poly = [
+        [lon, lat],
+        [lon + step, lat],
+        [lon + step, lat + step],
+        [lon, lat + step],
+        [lon, lat]
+      ];
+
+      features.push({
+        type: "Feature",
+        properties: { solar: value },
+        geometry: {
+          type: "Polygon",
+          coordinates: [poly]
+        }
       });
     }
   }
 
-  const heatmapLayer = new deck.HeatmapLayer({
-    id: 'solar-heat',
-    data: points,
-    getPosition: d => d.position,
-    getWeight: d => d.weight,
-    radiusPixels: 70,
-    intensity: 1.5,
-    threshold: 0.02
+  const solarLayer = new deck.GeoJsonLayer({
+    id: 'solar',
+    data: {
+      type: "FeatureCollection",
+      features: features
+    },
+    filled: true,
+    stroked: false,
+    opacity: 0.6,
+    getFillColor: d => {
+
+      const min = 1600;
+      const max = 2200;
+      const t = (d.properties.solar - min) / (max - min);
+
+      const r = Math.floor(30 + t * 225);
+      const g = Math.floor(144 + t * 100);
+      const b = Math.floor(255 - t * 200);
+
+      return [r, g, b, 200];
+    }
   });
 
   const overlay = new deck.MapboxOverlay({
-    layers: [heatmapLayer]
+    layers: [solarLayer]
   });
 
   map.addControl(overlay);
