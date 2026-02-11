@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Solar Potential – Greece</title>
+<title>Solar Potential – Greece (Clean Build)</title>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
+<script src="https://unpkg.com/deck.gl@8.9.34/dist.min.js"></script>
 
 <style>
 body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
@@ -13,26 +14,24 @@ body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
 
 .panel {
   position:absolute;
-  background:rgba(15,15,15,0.96);
+  background:rgba(15,15,15,0.95);
   color:#ddd;
   padding:14px;
   border-radius:4px;
   font-size:13px;
   z-index:10;
-  line-height:1.4;
 }
 
 #legend { bottom:20px; left:20px; width:260px; }
 
 .legend-gradient {
   height:14px;
-  background: linear-gradient(to right, #ffe680, #ffb000, #ff7800);
+  background: linear-gradient(to right, #1e90ff, #ffff00, #ff4500);
   margin:10px 0;
   border-radius:3px;
 }
 
 h3 { margin:0 0 6px 0; color:#fff; font-size:15px; }
-.small { font-size:11px; color:#aaa; }
 </style>
 </head>
 
@@ -41,9 +40,9 @@ h3 { margin:0 0 6px 0; color:#fff; font-size:15px; }
 <div id="map"></div>
 
 <div id="legend" class="panel">
-  <h3>Solar Irradiation (kWh/m²/year)</h3>
+  <h3>Solar Irradiation (Demo)</h3>
   <div class="legend-gradient"></div>
-  <div>1600 → 2000+</div>
+  <div>Low → High</div>
 </div>
 
 <script>
@@ -52,9 +51,9 @@ const MAPTILER_KEY = "fmHz7ZycUzBddOZvkGZO";
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${MAPTILER_KEY}`,
+  style: `https://api.maptiler.com/maps/basic-dark/style.json?key=${MAPTILER_KEY}`,
   center: [22.5, 39.0],
-  zoom: 6.3,
+  zoom: 6.2,
   pitch: 60,
   bearing: -20,
   antialias: true
@@ -64,79 +63,120 @@ map.addControl(new maplibregl.NavigationControl());
 
 map.on('load', () => {
 
-  // ---------------------------------------------------------------------------
-  // Improve lighting for 3D
-  // ---------------------------------------------------------------------------
-
-  map.setLight({
-    anchor: 'viewport',
-    position: [1.5, 90, 40],
-    intensity: 0.8,
-    color: '#ffffff'
-  });
-
-  // ---------------------------------------------------------------------------
-  // Solar layer (visible gradient)
-  // ---------------------------------------------------------------------------
-
-  map.addSource('solar-raster', {
-    type: 'raster',
-    tiles: [
-      'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-    ],
-    tileSize: 256
-  });
-
-  map.addLayer({
-    id: 'solar-layer',
-    type: 'raster',
-    source: 'solar-raster',
-    paint: {
-      'raster-opacity': 0.45,
-      'raster-saturation': 1.2,
-      'raster-contrast': 0.3,
-      'raster-hue-rotate': 40
-    }
-  });
-
-  // ---------------------------------------------------------------------------
-  // 3D Buildings with proper fallback height
-  // ---------------------------------------------------------------------------
+  // ------------------------------------------------------------
+  // REMOVE DEFAULT BUILDING LAYERS (IMPORTANT)
+  // ------------------------------------------------------------
 
   const layers = map.getStyle().layers;
-  let labelLayerId;
 
-  for (const layer of layers) {
-    if (layer.type === 'symbol' && layer.layout['text-field']) {
-      labelLayerId = layer.id;
-      break;
+  layers.forEach(layer => {
+    if (layer['source-layer'] === 'building') {
+      map.removeLayer(layer.id);
     }
-  }
+  });
+
+  // ------------------------------------------------------------
+  // ADD OUR OWN 3D BUILDINGS (HIGH CONTRAST)
+  // ------------------------------------------------------------
 
   map.addLayer({
-    id: '3d-buildings',
+    id: 'custom-buildings',
+    type: 'fill-extrusion',
     source: 'openmaptiles',
     'source-layer': 'building',
-    type: 'fill-extrusion',
-    minzoom: 14,
+    minzoom: 13,
     paint: {
-
-      'fill-extrusion-color': '#aaaaaa',
+      'fill-extrusion-color': '#ffffff',
 
       'fill-extrusion-height': [
         'case',
         ['has', 'height'], ['get', 'height'],
-        ['has', 'levels'], ['*', ['get', 'levels'], 4],
-        12
+        ['has', 'levels'], ['*', ['get', 'levels'], 5],
+        25
       ],
 
       'fill-extrusion-base': 0,
       'fill-extrusion-opacity': 0.95
     }
+  });
 
-  }, labelLayerId);
+  // ------------------------------------------------------------
+  // STRONG LIGHTING
+  // ------------------------------------------------------------
+
+  map.setLight({
+    anchor: 'viewport',
+    position: [2, 90, 60],
+    intensity: 1.2,
+    color: '#ffffff'
+  });
+
+  // ------------------------------------------------------------
+  // SOLAR SURFACE (VISIBLE GRID USING DECK.GL)
+  // ------------------------------------------------------------
+
+  const solarData = generateSolarSurface();
+
+  const solarLayer = new deck.GeoJsonLayer({
+    id: 'solar-layer',
+    data: solarData,
+    filled: true,
+    stroked: false,
+    opacity: 0.6,
+    getFillColor: d => {
+      const v = d.properties.solar;
+
+      if (v > 1900) return [255, 69, 0, 200];
+      if (v > 1750) return [255, 215, 0, 180];
+      return [30, 144, 255, 150];
+    }
+  });
+
+  const overlay = new deck.MapboxOverlay({
+    layers: [solarLayer]
+  });
+
+  map.addControl(overlay);
 
 });
+
+// ------------------------------------------------------------
+// Synthetic Solar Grid (CLEARLY VISIBLE)
+// ------------------------------------------------------------
+
+function generateSolarSurface() {
+
+  const features = [];
+  const step = 0.5;
+
+  for (let lon = 19; lon <= 28; lon += step) {
+    for (let lat = 34; lat <= 42; lat += step) {
+
+      const base = 1600;
+      const southBoost = (42 - lat) * 80;
+      const value = base + southBoost;
+
+      const poly = [
+        [lon, lat],
+        [lon + step, lat],
+        [lon + step, lat + step],
+        [lon, lat + step],
+        [lon, lat]
+      ];
+
+      features.push({
+        type: "Feature",
+        properties: { solar: value },
+        geometry: {
+          type: "Polygon",
+          coordinates: [poly]
+        }
+      });
+    }
+  }
+
+  return { type: "FeatureCollection", features };
+}
 
 </script>
 </body>
