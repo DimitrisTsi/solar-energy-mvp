@@ -44,22 +44,11 @@ h3 { margin:0 0 6px 0; color:#fff; font-size:15px; }
   <h3>Solar Irradiation (kWh/m²/year)</h3>
   <div class="legend-gradient"></div>
   <div>1600 → 2000+</div>
-  <div class="small">
-    Demo surface. Replace with PVGIS raster tiles.
-  </div>
 </div>
 
 <script>
 
-// -----------------------------------------------------------------------------
-// CONFIG
-// -----------------------------------------------------------------------------
-
 const MAPTILER_KEY = "fmHz7ZycUzBddOZvkGZO";
-
-// -----------------------------------------------------------------------------
-// MAP INITIALIZATION
-// -----------------------------------------------------------------------------
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -76,14 +65,24 @@ map.addControl(new maplibregl.NavigationControl());
 map.on('load', () => {
 
   // ---------------------------------------------------------------------------
-  // 1️⃣ Add Solar Raster Layer (Smooth Surface)
+  // Improve lighting for 3D
+  // ---------------------------------------------------------------------------
+
+  map.setLight({
+    anchor: 'viewport',
+    position: [1.5, 90, 40],
+    intensity: 0.8,
+    color: '#ffffff'
+  });
+
+  // ---------------------------------------------------------------------------
+  // Solar layer (visible gradient)
   // ---------------------------------------------------------------------------
 
   map.addSource('solar-raster', {
     type: 'raster',
     tiles: [
-      // This uses Carto grayscale terrain as placeholder smooth surface
-      'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png'
+      'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
     ],
     tileSize: 256
   });
@@ -93,14 +92,15 @@ map.on('load', () => {
     type: 'raster',
     source: 'solar-raster',
     paint: {
-      'raster-opacity': 0.35,
-      'raster-hue-rotate': 45,
-      'raster-saturation': 0.8
+      'raster-opacity': 0.45,
+      'raster-saturation': 1.2,
+      'raster-contrast': 0.3,
+      'raster-hue-rotate': 40
     }
-  }, 'water'); // place below labels
+  });
 
   // ---------------------------------------------------------------------------
-  // 2️⃣ Add Real 3D Buildings
+  // 3D Buildings with proper fallback height
   // ---------------------------------------------------------------------------
 
   const layers = map.getStyle().layers;
@@ -120,16 +120,20 @@ map.on('load', () => {
     type: 'fill-extrusion',
     minzoom: 14,
     paint: {
-      'fill-extrusion-color': '#777',
+
+      'fill-extrusion-color': '#aaaaaa',
+
       'fill-extrusion-height': [
-        'coalesce',
-        ['get', 'height'],
-        ['*', ['get', 'levels'], 3],
-        6
+        'case',
+        ['has', 'height'], ['get', 'height'],
+        ['has', 'levels'], ['*', ['get', 'levels'], 4],
+        12
       ],
+
       'fill-extrusion-base': 0,
       'fill-extrusion-opacity': 0.95
     }
+
   }, labelLayerId);
 
 });
