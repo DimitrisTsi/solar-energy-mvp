@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Solar Potential Explorer – Greece</title>
+
+<script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
+
+<script src="https://unpkg.com/deck.gl@8.9.34/dist.min.js"></script>
+
+<style>
+body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
+#map { width:100vw; height:100vh; }
+
+.panel {
+  position:absolute;
+  background:rgba(15,15,15,0.92);
+  color:#ddd;
+  padding:12px;
+  border-radius:4px;
+  font-size:12px;
+  z-index:10;
+}
+
+#controls { top:20px; left:20px; width:260px; }
+#metadata { bottom:20px; left:20px; width:320px; }
+#infobox { bottom:20px; right:20px; width:260px; }
+
+h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
+button {
+  margin-top:8px;
+  width:100%;
+  padding:6px;
+  background:#222;
+  color:#fff;
+  border:1px solid #444;
+  cursor:pointer;
+}
+button:hover { background:#333; }
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<div id="controls" class="panel">
+  <strong>Solar Filter</strong><br><br>
+  <label>Minimum potential (kWh/m²/year)</label>
+  <input id="solarSlider" type="range" min="1200" max="2000" step="50" value="1200">
+  <div>Value: <span id="solarValue">1200</span></div>
+  <button id="exportBtn">Export Screenshot</button>
+</div>
+
+<div id="metadata" class="panel">
+  <h3>Solar Energy Potential – Greece</h3>
+  <p>
+    3D visualization of annual solar irradiation potential.
+  </p>
+  <p><strong>Unit:</strong> kWh/m²/year</p>
+  <p><strong>Encoding:</strong><br>
+  Height → Solar potential<br>
+  Color → Viability class</p>
+</div>
+
+<div id="infobox" class="panel">
+  <strong>Cell Info</strong>
+  <div id="infoContent">Click a column</div>
+</div>
+
+<script>
+
+// -----------------------------------------------------------------------------
+// Map Setup
+// -----------------------------------------------------------------------------
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center: [22.5, 38.5],
+  zoom: 6.3,
+  pitch: 60,
+  bearing: -20,
+  antialias: true,
+  preserveDrawingBuffer: true
+});
+
+map.addControl(new maplibregl.NavigationControl());
+
+// -----------------------------------------------------------------------------
+// Synthetic Solar Grid (Demo Values)
+// Replace this with real PVGIS grid later
+// -----------------------------------------------------------------------------
+
+function generateSolarGrid() {
+  const grid = [];
+  for (let lon = 19; lon <= 28; lon += 0.5) {
+    for (let lat = 35; lat <= 41; lat += 0.5) {
+      const base = 1500;
+      const southBoost = (41 - lat) * 60;
+      const randomVar = Math.random() * 80;
+      const value = base + southBoost + randomVar;
+
+      grid.push({
+        position: [lon, lat],
+        solar: Math.round(value)
+      });
+    }
+  }
+  return grid;
+}
+
+let solarData = generateSolarGrid();
+let overlay = null;
+
+// -----------------------------------------------------------------------------
+// Update Layer
+// -----------------------------------------------------------------------------
+function updateLayer() {
+
+  const minVal = parseInt(document.getElementById('solarSlider').value);
+
+  const filtered = solarData.filter(d => d.solar >= minVal);
+
+  const layer = new deck.ColumnLayer({
+    id: 'solar',
+    data: filtered,
+    diskResolution: 12,
+    radius: 20000,
+    extruded: true,
+    elevationScale: 5,
+    getPosition: d => d.position,
+    getElevation: d => d.solar,
+    getFillColor: d => {
+      if (d.solar > 1800) return [255, 120, 0];
+      if (d.solar > 1600) return [255, 180, 0];
+      return [255, 230, 120];
+    },
+    pickable: true,
+    onClick: ({object}) => {
+      if (!object) return;
+      document.getElementById('infoContent').innerHTML =
+        `<p><strong>Solar potential:</strong> ${object.solar} kWh/m²/year</p>
+         <p><strong>Lon:</strong> ${object.position[0]}</p>
+         <p><strong>Lat:</strong> ${object.position[1]}</p>`;
+    }
+  });
+
+  if (!overlay) {
+    overlay = new deck.MapboxOverlay({ layers: [layer] });
+    map.addControl(overlay);
+  } else {
+    overlay.setProps({ layers: [layer] });
+  }
+}
+
+updateLayer();
+
+// -----------------------------------------------------------------------------
+// UI Wiring
+// -----------------------------------------------------------------------------
+const solarSlider = document.getElementById('solarSlider');
+const solarValue = document.getElementById('solarValue');
+
+solarSlider.addEventListener('input', () => {
+  solarValue.textContent = solarSlider.value;
+  updateLayer();
+});
+
+// -----------------------------------------------------------------------------
+// Screenshot
+// -----------------------------------------------------------------------------
+document.getElementById('exportBtn').addEventListener('click', () => {
+  ['controls','metadata','infobox'].forEach(id =>
+    document.getElementById(id).style.display = 'none'
+  );
+
+  setTimeout(() => {
+    const link = document.createElement('a');
+    link.download = 'solar_potential_greece.png';
+    link.href = map.getCanvas().toDataURL('image/png');
+    link.click();
+
+    ['controls','metadata','infobox'].forEach(id =>
+      document.getElementById(id).style.display = ''
+    );
+  }, 300);
+});
+
+</script>
+</body>
+</html>
