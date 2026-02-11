@@ -6,7 +6,6 @@
 
 <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
-
 <script src="https://unpkg.com/deck.gl@8.9.34/dist.min.js"></script>
 
 <style>
@@ -15,7 +14,7 @@ body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
 
 .panel {
   position:absolute;
-  background:rgba(15,15,15,0.92);
+  background:rgba(15,15,15,0.95);
   color:#ddd;
   padding:12px;
   border-radius:4px;
@@ -23,8 +22,16 @@ body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
   z-index:10;
 }
 
-#metadata { bottom:20px; left:20px; width:320px; }
+#legend { bottom:20px; left:20px; width:240px; }
+
 h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
+.legend-item { margin:4px 0; }
+.legend-color {
+  display:inline-block;
+  width:14px;
+  height:14px;
+  margin-right:6px;
+}
 </style>
 </head>
 
@@ -32,25 +39,29 @@ h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
 
 <div id="map"></div>
 
-<div id="metadata" class="panel">
-  <h3>Urban Solar Potential – Chania</h3>
-  <p>
-    Solar irradiation shown as surface color.
-    Buildings extruded for urban context.
-  </p>
-  <p><strong>Unit:</strong> kWh/m²/year</p>
+<div id="legend" class="panel">
+  <h3>Solar Potential (kWh/m²/year)</h3>
+  <div class="legend-item">
+    <span class="legend-color" style="background:#ff7800;"></span> > 1800
+  </div>
+  <div class="legend-item">
+    <span class="legend-color" style="background:#ffb000;"></span> 1700–1800
+  </div>
+  <div class="legend-item">
+    <span class="legend-color" style="background:#ffe680;"></span> < 1700
+  </div>
 </div>
 
 <script>
 
 // -----------------------------------------------------------------------------
-// Map Setup – Direct zoom to Chania
+// Map Setup – Use OpenMapTiles style (supports buildings)
 // -----------------------------------------------------------------------------
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  center: [24.018, 35.513],   // Chania
+  style: 'https://demotiles.maplibre.org/style.json',
+  center: [24.018, 35.513],
   zoom: 15.5,
   pitch: 60,
   bearing: -20,
@@ -59,23 +70,28 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl());
 
+// Limit extent to city
+map.setMaxBounds([
+  [23.95, 35.47],
+  [24.08, 35.56]
+]);
 
 // -----------------------------------------------------------------------------
-// Generate Solar Surface Grid (Demo values for Chania)
+// Generate Solar Surface (City-scale)
 // -----------------------------------------------------------------------------
 
 function generateSolarSurface() {
   const features = [];
-  const step = 0.002; // small cells for city scale
+  const step = 0.002;
 
   for (let lon = 23.99; lon <= 24.05; lon += step) {
     for (let lat = 35.49; lat <= 35.54; lat += step) {
 
       const base = 1700;
       const gradient = (35.54 - lat) * 200;
-      const value = base + gradient + Math.random() * 50;
+      const value = base + gradient + Math.random() * 40;
 
-      const polygon = [
+      const poly = [
         [lon, lat],
         [lon + step, lat],
         [lon + step, lat + step],
@@ -86,18 +102,12 @@ function generateSolarSurface() {
       features.push({
         type: "Feature",
         properties: { solar: Math.round(value) },
-        geometry: {
-          type: "Polygon",
-          coordinates: [polygon]
-        }
+        geometry: { type: "Polygon", coordinates: [poly] }
       });
     }
   }
 
-  return {
-    type: "FeatureCollection",
-    features: features
-  };
+  return { type: "FeatureCollection", features };
 }
 
 const solarGeoJSON = generateSolarSurface();
@@ -106,43 +116,34 @@ let overlay = null;
 
 map.on('load', () => {
 
+  // Make style darker
+  map.setPaintProperty('background', 'background-color', '#0b0b0b');
+
   // ---------------------------------------------------------------------------
-  // 3D Buildings
+  // 3D Buildings (real extrusion)
   // ---------------------------------------------------------------------------
 
-  const layers = map.getStyle().layers;
-  let labelLayerId;
-  for (const layer of layers) {
-    if (layer.type === 'symbol' && layer.layout['text-field']) {
-      labelLayerId = layer.id;
-      break;
+  map.addLayer({
+    id: '3d-buildings',
+    source: 'openmaptiles',
+    'source-layer': 'building',
+    type: 'fill-extrusion',
+    minzoom: 14,
+    paint: {
+      'fill-extrusion-color': '#444',
+      'fill-extrusion-height': [
+        'coalesce',
+        ['get', 'height'],
+        ['*', ['get', 'levels'], 3],
+        8
+      ],
+      'fill-extrusion-base': 0,
+      'fill-extrusion-opacity': 0.9
     }
-  }
-
-  map.addLayer(
-    {
-      id: '3d-buildings',
-      source: 'openmaptiles',
-      'source-layer': 'building',
-      type: 'fill-extrusion',
-      minzoom: 14,
-      paint: {
-        'fill-extrusion-color': '#666',
-        'fill-extrusion-height': [
-          'coalesce',
-          ['get', 'height'],
-          ['*', ['get', 'levels'], 3],
-          8
-        ],
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0.85
-      }
-    },
-    labelLayerId
-  );
+  });
 
   // ---------------------------------------------------------------------------
-  // Solar Surface Layer (2D colored)
+  // Solar Surface Layer
   // ---------------------------------------------------------------------------
 
   const solarLayer = new deck.GeoJsonLayer({
@@ -152,21 +153,14 @@ map.on('load', () => {
     stroked: false,
     getFillColor: d => {
       const v = d.properties.solar;
-      if (v > 1800) return [255, 120, 0, 160];
-      if (v > 1700) return [255, 170, 0, 140];
-      return [255, 230, 120, 120];
+      if (v > 1800) return [255,120,0,180];
+      if (v > 1700) return [255,176,0,160];
+      return [255,230,120,140];
     },
-    pickable: true,
-    onClick: ({object}) => {
-      if (!object) return;
-      alert(`Solar potential: ${object.properties.solar} kWh/m²/year`);
-    }
+    pickable: true
   });
 
-  overlay = new deck.MapboxOverlay({
-    layers: [solarLayer]
-  });
-
+  overlay = new deck.MapboxOverlay({ layers: [solarLayer] });
   map.addControl(overlay);
 });
 
