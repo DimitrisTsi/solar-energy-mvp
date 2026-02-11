@@ -1,4 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Solar MVP</title>
+
+<link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
+
+<style>
+body { margin:0; }
+#map { width:100vw; height:100vh; }
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<!-- Load MapLibre FIRST -->
+<script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+
+<!-- Load Deck FULL BUNDLE -->
+<script src="https://unpkg.com/deck.gl@8.9.34/dist/umd/deck.gl.js"></script>
+
+<!-- THEN your code -->
 <script>
+
+console.log("Script running...");
 
 const MAPTILER_KEY = "fmHz7ZycUzBddOZvkGZO";
 
@@ -8,104 +35,16 @@ const map = new maplibregl.Map({
   center: [22.5, 39.0],
   zoom: 6.2,
   pitch: 60,
-  bearing: -20,
-  antialias: true
+  bearing: -20
 });
 
 map.addControl(new maplibregl.NavigationControl());
 
 map.on('load', () => {
-
-  // ------------------------------------------------------------
-  // REMOVE DEFAULT BUILDING LAYERS
-  // ------------------------------------------------------------
-
-  const layers = map.getStyle().layers;
-  layers.forEach(layer => {
-    if (layer['source-layer'] === 'building') {
-      map.removeLayer(layer.id);
-    }
-  });
-
-  // ------------------------------------------------------------
-  // ADD CLEAN 3D BUILDINGS
-  // ------------------------------------------------------------
-
-  map.addLayer({
-    id: 'custom-buildings',
-    type: 'fill-extrusion',
-    source: 'openmaptiles',
-    'source-layer': 'building',
-    minzoom: 13,
-    paint: {
-      'fill-extrusion-color': '#ffffff',
-      'fill-extrusion-height': [
-        'case',
-        ['has', 'height'], ['get', 'height'],
-        ['has', 'levels'], ['*', ['get', 'levels'], 5],
-        25
-      ],
-      'fill-extrusion-opacity': 0.95
-    }
-  });
-
-  map.setLight({
-    anchor: 'viewport',
-    position: [2, 90, 60],
-    intensity: 1.2,
-    color: '#ffffff'
-  });
-
-  // ------------------------------------------------------------
-  // SOLAR HEATMAP (SMOOTH SURFACE)
-  // ------------------------------------------------------------
-
-  const solarPoints = generateSolarPoints();
-
-  const heatmapLayer = new deck.HeatmapLayer({
-    id: 'solar-heatmap',
-    data: solarPoints,
-    getPosition: d => [d.lon, d.lat],
-    getWeight: d => d.value,
-    radiusPixels: 60,
-    intensity: 1,
-    threshold: 0.05,
-    aggregation: 'MEAN'
-  });
-
-  const overlay = new deck.MapboxOverlay({
-    layers: [heatmapLayer]
-  });
-
-  map.addControl(overlay);
-
+  console.log("Map loaded");
 });
 
-// ------------------------------------------------------------
-// GENERATE SOLAR POINT FIELD
-// ------------------------------------------------------------
-
-function generateSolarPoints() {
-
-  const points = [];
-
-  const step = 0.2;   // resolution
-  for (let lon = 19; lon <= 28; lon += step) {
-    for (let lat = 34; lat <= 42; lat += step) {
-
-      const base = 1600;
-      const southBoost = (42 - lat) * 80;
-      const value = base + southBoost;
-
-      points.push({
-        lon: lon,
-        lat: lat,
-        value: value
-      });
-    }
-  }
-
-  return points;
-}
-
 </script>
+
+</body>
+</html>
