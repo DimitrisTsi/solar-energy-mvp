@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Solar Potential Explorer – Greece</title>
+<title>Urban Solar Potential – Chania</title>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
@@ -23,21 +23,8 @@ body { margin:0; overflow:hidden; background:#000; font-family:system-ui; }
   z-index:10;
 }
 
-#controls { top:20px; left:20px; width:260px; }
 #metadata { bottom:20px; left:20px; width:320px; }
-#infobox { bottom:20px; right:20px; width:260px; }
-
 h3 { margin:0 0 6px 0; color:#fff; font-size:14px; }
-button {
-  margin-top:8px;
-  width:100%;
-  padding:6px;
-  background:#222;
-  color:#fff;
-  border:1px solid #444;
-  cursor:pointer;
-}
-button:hover { background:#333; }
 </style>
 </head>
 
@@ -45,148 +32,145 @@ button:hover { background:#333; }
 
 <div id="map"></div>
 
-<div id="controls" class="panel">
-  <strong>Solar Filter</strong><br><br>
-  <label>Minimum potential (kWh/m²/year)</label>
-  <input id="solarSlider" type="range" min="1200" max="2000" step="50" value="1200">
-  <div>Value: <span id="solarValue">1200</span></div>
-  <button id="exportBtn">Export Screenshot</button>
-</div>
-
 <div id="metadata" class="panel">
-  <h3>Solar Energy Potential – Greece</h3>
+  <h3>Urban Solar Potential – Chania</h3>
   <p>
-    3D visualization of annual solar irradiation potential.
+    Solar irradiation shown as surface color.
+    Buildings extruded for urban context.
   </p>
   <p><strong>Unit:</strong> kWh/m²/year</p>
-  <p><strong>Encoding:</strong><br>
-  Height → Solar potential<br>
-  Color → Viability class</p>
-</div>
-
-<div id="infobox" class="panel">
-  <strong>Cell Info</strong>
-  <div id="infoContent">Click a column</div>
 </div>
 
 <script>
 
 // -----------------------------------------------------------------------------
-// Map Setup
+// Map Setup – Direct zoom to Chania
 // -----------------------------------------------------------------------------
+
 const map = new maplibregl.Map({
   container: 'map',
   style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  center: [22.5, 38.5],
-  zoom: 6.3,
+  center: [24.018, 35.513],   // Chania
+  zoom: 15.5,
   pitch: 60,
   bearing: -20,
-  antialias: true,
-  preserveDrawingBuffer: true
+  antialias: true
 });
 
 map.addControl(new maplibregl.NavigationControl());
 
+
 // -----------------------------------------------------------------------------
-// Synthetic Solar Grid (Demo Values)
-// Replace this with real PVGIS grid later
+// Generate Solar Surface Grid (Demo values for Chania)
 // -----------------------------------------------------------------------------
 
-function generateSolarGrid() {
-  const grid = [];
-  for (let lon = 19; lon <= 28; lon += 0.5) {
-    for (let lat = 35; lat <= 41; lat += 0.5) {
-      const base = 1500;
-      const southBoost = (41 - lat) * 60;
-      const randomVar = Math.random() * 80;
-      const value = base + southBoost + randomVar;
+function generateSolarSurface() {
+  const features = [];
+  const step = 0.002; // small cells for city scale
 
-      grid.push({
-        position: [lon, lat],
-        solar: Math.round(value)
+  for (let lon = 23.99; lon <= 24.05; lon += step) {
+    for (let lat = 35.49; lat <= 35.54; lat += step) {
+
+      const base = 1700;
+      const gradient = (35.54 - lat) * 200;
+      const value = base + gradient + Math.random() * 50;
+
+      const polygon = [
+        [lon, lat],
+        [lon + step, lat],
+        [lon + step, lat + step],
+        [lon, lat + step],
+        [lon, lat]
+      ];
+
+      features.push({
+        type: "Feature",
+        properties: { solar: Math.round(value) },
+        geometry: {
+          type: "Polygon",
+          coordinates: [polygon]
+        }
       });
     }
   }
-  return grid;
+
+  return {
+    type: "FeatureCollection",
+    features: features
+  };
 }
 
-let solarData = generateSolarGrid();
+const solarGeoJSON = generateSolarSurface();
+
 let overlay = null;
 
-// -----------------------------------------------------------------------------
-// Update Layer
-// -----------------------------------------------------------------------------
-function updateLayer() {
+map.on('load', () => {
 
-  const minVal = parseInt(document.getElementById('solarSlider').value);
+  // ---------------------------------------------------------------------------
+  // 3D Buildings
+  // ---------------------------------------------------------------------------
 
-  const filtered = solarData.filter(d => d.solar >= minVal);
+  const layers = map.getStyle().layers;
+  let labelLayerId;
+  for (const layer of layers) {
+    if (layer.type === 'symbol' && layer.layout['text-field']) {
+      labelLayerId = layer.id;
+      break;
+    }
+  }
 
-  const layer = new deck.ColumnLayer({
-    id: 'solar',
-    data: filtered,
-    diskResolution: 12,
-    radius: 20000,
-    extruded: true,
-    elevationScale: 5,
-    getPosition: d => d.position,
-    getElevation: d => d.solar,
+  map.addLayer(
+    {
+      id: '3d-buildings',
+      source: 'openmaptiles',
+      'source-layer': 'building',
+      type: 'fill-extrusion',
+      minzoom: 14,
+      paint: {
+        'fill-extrusion-color': '#666',
+        'fill-extrusion-height': [
+          'coalesce',
+          ['get', 'height'],
+          ['*', ['get', 'levels'], 3],
+          8
+        ],
+        'fill-extrusion-base': 0,
+        'fill-extrusion-opacity': 0.85
+      }
+    },
+    labelLayerId
+  );
+
+  // ---------------------------------------------------------------------------
+  // Solar Surface Layer (2D colored)
+  // ---------------------------------------------------------------------------
+
+  const solarLayer = new deck.GeoJsonLayer({
+    id: 'solar-surface',
+    data: solarGeoJSON,
+    filled: true,
+    stroked: false,
     getFillColor: d => {
-      if (d.solar > 1800) return [255, 120, 0];
-      if (d.solar > 1600) return [255, 180, 0];
-      return [255, 230, 120];
+      const v = d.properties.solar;
+      if (v > 1800) return [255, 120, 0, 160];
+      if (v > 1700) return [255, 170, 0, 140];
+      return [255, 230, 120, 120];
     },
     pickable: true,
     onClick: ({object}) => {
       if (!object) return;
-      document.getElementById('infoContent').innerHTML =
-        `<p><strong>Solar potential:</strong> ${object.solar} kWh/m²/year</p>
-         <p><strong>Lon:</strong> ${object.position[0]}</p>
-         <p><strong>Lat:</strong> ${object.position[1]}</p>`;
+      alert(`Solar potential: ${object.properties.solar} kWh/m²/year`);
     }
   });
 
-  if (!overlay) {
-    overlay = new deck.MapboxOverlay({ layers: [layer] });
-    map.addControl(overlay);
-  } else {
-    overlay.setProps({ layers: [layer] });
-  }
-}
+  overlay = new deck.MapboxOverlay({
+    layers: [solarLayer]
+  });
 
-updateLayer();
-
-// -----------------------------------------------------------------------------
-// UI Wiring
-// -----------------------------------------------------------------------------
-const solarSlider = document.getElementById('solarSlider');
-const solarValue = document.getElementById('solarValue');
-
-solarSlider.addEventListener('input', () => {
-  solarValue.textContent = solarSlider.value;
-  updateLayer();
-});
-
-// -----------------------------------------------------------------------------
-// Screenshot
-// -----------------------------------------------------------------------------
-document.getElementById('exportBtn').addEventListener('click', () => {
-  ['controls','metadata','infobox'].forEach(id =>
-    document.getElementById(id).style.display = 'none'
-  );
-
-  setTimeout(() => {
-    const link = document.createElement('a');
-    link.download = 'solar_potential_greece.png';
-    link.href = map.getCanvas().toDataURL('image/png');
-    link.click();
-
-    ['controls','metadata','infobox'].forEach(id =>
-      document.getElementById(id).style.display = ''
-    );
-  }, 300);
+  map.addControl(overlay);
 });
 
 </script>
+
 </body>
 </html>
